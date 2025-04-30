@@ -5,7 +5,7 @@ import datetime
 import numpy as np
 import re
 import wfdb
-from wfdb.io import rdannn
+from wfdb.io import rdann
 import scipy
 import pywt
 from scipy.signal import resample
@@ -28,18 +28,15 @@ def get_scored_labels(comments):
 # Load all WFDB records from a directory
 # Parameters:
 # path - path to the record directory
-def load_signals_labels(path, max_records=None):
-    s_dir = pd.Series(os.listdir(file_path)).sort_values()
+def load_signals_labels(pth, max_records=None):
+    s_dir = pd.Series(os.listdir(pth)).sort_values()
     s_dir = s_dir[s_dir.str.contains('.hea')].reset_index(drop=True).apply(lambda filename: filename[:-4])
     if max_records is not None:
         s_dir = s_dir[:max_records]
     df_records = s_dir.to_frame(name='record_name')
-    df_records['record'] = df_records.record_name.apply(lambda x: wfdb.rdrecord(file_path + '/' + x))
+    df_records['record'] = df_records.record_name.apply(lambda x: wfdb.rdrecord(pth + '\\' + x))
     df_records['comments'] = df_records.record.apply(lambda x: x.comments)
 
-    # Leads III, aVR, aVL and aVF can be removed - these leads can be mathematically reconstructed from leads I and II
-    # In records: correspond to rows 3, 4, 5, 6
-    #df_records['signal'] = df_records['record'].apply(lambda x: np.delete(x.p_signal, [2,3,4,5], axis=1))
     df_records['signal'] = df_records['record'].apply(lambda x: x.p_signal)
     df_records['record_length'] = df_records.record.apply(lambda x: x.sig_len)
     df_records['frequency'] = df_records.record.apply(lambda x: x.fs)
@@ -48,7 +45,6 @@ def load_signals_labels(path, max_records=None):
     df_records = df_records[df_records.labels.apply(lambda x: True if len(x)>0 else False)].reset_index(drop=True)
 
     df_records.drop(columns=['record', 'comments'], inplace=True)
-    # Get labels
 
     return df_records
 
@@ -60,7 +56,7 @@ def load_signals_labels(path, max_records=None):
 # lvl - Decomposition level - default is 9
 def denoise_dwt(signal, wavelet='db5', lvl=6):
     coeffs = pywt.wavedec(signal, wavelet=wavelet, level=lvl)
-    threshold = ((np.median(np.abs(coeffs[-1]) / NORMAL_MAD )) * np.sqrt(2 * np.log(len(signal)))) * threshold_sf
+    threshold = ((np.median(np.abs(coeffs[-1]) / NORMAL_MAD )) * np.sqrt(2 * np.log(len(signal))))
     for i in range(1, len(coeffs)):
       coeffs[i] = pywt.threshold(coeffs[i], threshold, mode='soft')
     reconstructed = pywt.waverec(coeffs, wavelet=wavelet)
@@ -68,10 +64,10 @@ def denoise_dwt(signal, wavelet='db5', lvl=6):
 
 
 # denoise_dwt_all: Multi-lead signal denoising via Discrete Wavelet Transform
-def denoise_dwt_all(signal, wavelet='db5', lvl=9, threshold_sf = 1):
+def denoise_dwt_all(signal, wavelet='db5', lvl=9):
   sig = signal.copy()
   for lead in range(signal.shape[1]):
-    signal_denoised = denoise_dwt(sig[:, lead], wavelet=wavelet, lvl=lvl, threshold_sf=threshold_sf)
+    signal_denoised = denoise_dwt(sig[:, lead], wavelet=wavelet, lvl=lvl)
     if len(signal_denoised) != sig.shape[0]:
       if len(signal_denoised) > sig.shape[0]:
         signal_denoised = signal_denoised[:sig.shape[0]]
@@ -146,10 +142,12 @@ if __name__ == "__main__":
         target_path = current_path + "\\" + sys.argv[2]
     
     # Get source directory names for all datasets
-    source_paths = os.listdir(data_path).sort()
+    source_paths = os.listdir(data_path)
     
     # List of all subdirectories for all dataset sources
-    sub_directories = [os.listdir(data_path+"\\"+source).sort() for source in source_paths]
+    print(data_path)
+    print(source_paths)
+    sub_directories = [os.listdir(data_path+"\\"+source) for source in source_paths]
     
     for i, src_path in enumerate(source_paths):
         print(f"Loading & Saving Dataset {src_path}...")
@@ -160,17 +158,18 @@ if __name__ == "__main__":
             records = os.listdir(full_path)
             
             # Load records in sub-directory, denoise signals & convert records to uniform format
-            data = load_signals_labels(records)
+            data = load_signals_labels(full_path)
             data.signal = data.apply(lambda row: remove_baseline_wander(row.signal, fs=row.frequency), axis=1)
             data.signal = data.signal.apply(lambda x: denoise_dwt_all(x))
             data = make_uniform(data)
             
             # Save data to pickle file format
             data.to_pickle(f"{target_path}\\{src_path}_{sub_dir}.pkl")
+
+    print(f"{'='*10} Data processing complete! {'='*10}")
             
 
 
-            
             
                         
     
